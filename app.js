@@ -5,6 +5,10 @@ const cibleList = [];
 
 app.use(express.json());
 
+app.get('/', async (req, res, next) => {
+    res.send({ message: 'Backend du projet : Site Flm ' });
+  });
+
 app.post('/identify', (req, res) => {
     const { computer_name = 'Unknown' } = req.body;
     cibleList.push(computer_name);
