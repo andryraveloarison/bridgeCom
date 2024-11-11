@@ -1,10 +1,15 @@
 {
-  "cibleList": [
-    "Lenovo",
-    "Unknown"
-  ],
-  "commandes": [
-    "ls",
-    "Lenovo%ls%15/01/23"
-  ]
+   "cibleList": [
+      "Lenovo",
+      "Unknown"
+   ],
+   "commandes": [
+      "ls",
+      "Lenovo%mkdir%15/01/24",
+      "Azuz%cd%15/01/24"
+   ],
+   "reponses": [
+      "Azuz%reponse de azuss",
+      "HP%reponse de azuss"
+   ]
 }
