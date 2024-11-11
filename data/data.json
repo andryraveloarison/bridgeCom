@@ -1,7 +1,9 @@
 {
    "cibleList": [
       "Lenovo",
-      "Unknown"
+      "Unknown",
+      "test",
+      "re"
    ],
    "commandes": [
       "ls",
