@@ -73,13 +73,14 @@ app.post('/getCommande', async (req, res) => {
 
     commandes.forEach((cmd) => {
         const dataCmd = cmd.split("%");
+
         if (dataCmd[0] === dataInfo[0] && (dataCmd[1] !== dataInfo[1] || dataCmd[2] !== dataInfo[2])) {
             newCmd = cmd;
         }
     });
 
     if (newCmd) {
-        res.json({ message: 'nouveau commande', commandes: newCmd });
+        res.json({ message: 'nouveau commande', commande: newCmd });
     } else {
         res.json({ message: 'Aucune nouveau commande' });
     }
