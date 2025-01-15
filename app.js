@@ -35,7 +35,14 @@ app.get('/commandes', async (req, res) => {
 app.post('/identify', async (req, res) => {
     const { computer_name = 'Unknown' } = req.body;
     const cibleList = JSON.parse(await redis.get('cibleList')) || [];
-    cibleList.push(computer_name);
+
+    let isExist=false
+    cibleList.forEach((cible) => {
+        if(cible == computer_name){
+            isExist=true
+        }
+    })
+    !isExist & cibleList.push(computer_name)
     await redis.set('cibleList', JSON.stringify(cibleList));
     res.json({ message: `Request from computer: ${computer_name}`, cibleList });
 });
